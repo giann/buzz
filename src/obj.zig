@@ -45,6 +45,7 @@ pub const ObjType = enum {
     Bound,
     Native,
     Error,
+    Routine,
 };
 
 pub fn allocateObject(vm: *VM, comptime T: type, data: T) !*T {
@@ -174,6 +175,7 @@ pub const Obj = struct {
 
             .Native => unreachable, // TODO: we don't know how to embark NativeFn type at runtime yet
             .Error => unreachable, //type_def.def_type == .Error,
+            .Routine => type_def.def_type == .Routine,
         };
     }
 
@@ -181,6 +183,7 @@ pub const Obj = struct {
         return switch (self.obj_type) {
             .String => type_def.def_type == .String,
             .Type => type_def.def_type == .Type,
+            .Routine => type_def.def_type == .Routine,
             .UpValue => uv: {
                 var upvalue: *ObjUpValue = ObjUpValue.cast(self).?;
                 break :uv valueTypeEql(upvalue.closed orelse upvalue.location.*, type_def);
@@ -251,7 +254,8 @@ pub const Obj = struct {
             .Map,
             .Enum,
             .Native,
-            .Error => {
+            .Error,
+            .Routine, => {
                 return self == other;
             },
         }
@@ -287,6 +291,73 @@ pub const ObjNative = struct {
 
     pub fn cast(obj: *Obj) ?*Self {
         if (obj.obj_type != .Native) {
+            return null;
+        }
+
+        return @fieldParentPtr(Self, "obj", obj);
+    }
+};
+
+pub const ObjRoutine = struct {
+    const Self = @This();
+
+    const State = enum {
+        Normal,
+        Suspended,
+        Over,
+    };
+
+    obj: Obj = .{
+        .obj_type = .Routine,
+    },
+
+    closure: *ObjClosure,
+    routine: *VM,
+    state: State = .Normal,
+
+    pub fn rawStart(self: *Self, host: *VM, arguments: std.ArrayList(Value)) VM.Error!void {
+        if (self.state != .Normal) {
+            return host.runtimeError(.BadRoutineState, Value{ .Null = null }, null);
+        }
+        
+        // TODO: capture closure's upvalues
+
+        // TODO: is this necessary?
+        self.routine.push(Value{ .Null = null });
+        for (arguments.items) |arg| {
+            self.routine.push(arg);
+        }
+
+        _ = try self.routine.call(self.closure, arguments.len);
+
+        return try self.routine.run();
+    }
+
+    pub fn rawResume(self: *Self, host: *VM) VM.Error!void {
+        if (self.state != .Suspended) {
+            return host.runtimeError(.BadRoutineState, Value{ .Null = null }, null);
+        }
+
+        return try self.routine.run();
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.routine.deinit();
+    }
+
+    pub fn mark(_: *Self, _: *VM) void {
+    }
+
+    pub fn toObj(self: *Self) *Obj {
+        return &self.obj;
+    }
+
+    pub fn toValue(self: *Self) Value {
+        return Value{ .Obj = self.toObj() };
+    }
+
+    pub fn cast(obj: *Obj) ?*Self {
+        if (obj.obj_type != .Routine) {
             return null;
         }
 
@@ -1198,7 +1269,6 @@ pub const ObjBoundMethod = struct {
 pub const ObjTypeDef = struct {
     const Self = @This();
 
-    // TODO: merge this with ObjType
     pub const Type = enum {
         Bool,
         Number,
@@ -1213,6 +1283,7 @@ pub const ObjTypeDef = struct {
         Type, // Something that holds a type, not an actual type
         Void,
         Native,
+        Routine,
 
         Placeholder, // Used in first-pass when we refer to a not yet parsed type
     };
@@ -1224,6 +1295,7 @@ pub const ObjTypeDef = struct {
         String: bool,
         Type: bool,
         Void: bool,
+        Routine: bool,
 
         // For those we check that the value is an instance of, because those are user defined types
         ObjectInstance: *ObjTypeDef,
@@ -1274,6 +1346,7 @@ pub const ObjTypeDef = struct {
             .Bool => try type_str.appendSlice("bool"),
             .Number => try type_str.appendSlice("num"),
             .String => try type_str.appendSlice("str"),
+            .Routine => try type_str.appendSlice("thd"),
 
             // TODO: Find a key for vm.getTypeDef which is unique for each class even with the same name
             .Object => {
@@ -1419,7 +1492,7 @@ pub const ObjTypeDef = struct {
         }
 
         return switch (a) {
-            .Bool, .Number, .String, .Type, .Void => return true,
+            .Bool, .Number, .String, .Type, .Void, .Routine, => return true,
 
             .ObjectInstance => {
                 return a.ObjectInstance.eql(b.ObjectInstance)
@@ -1578,6 +1651,11 @@ pub fn objToString(allocator: *Allocator, buf: []u8, obj: *Obj) (Allocator.Error
             var err: *ObjError = ObjError.cast(obj).?;
 
             return try std.fmt.bufPrint(buf, "err: 0x{x} `{s}`", .{ @ptrToInt(err), err.message.string });
+        },
+        .Routine => {
+            var routine: *ObjRoutine = ObjRoutine.cast(obj).?;
+
+            return try std.fmt.bufPrint(buf, "thread: 0x{x}", .{ @ptrToInt(routine) });
         }
     };
 }

@@ -1,0 +1,23 @@
+import "lib/std.buzz";
+
+| > return, yield out, yield in
+fun *(num, str) hey() > void {
+    for (num i = 0; i < 10; i = i + 1) {
+        print(yield i); | Not a fan of something both receiving and sending stuff
+    }
+}
+
+fun *(num, str) callingYieldable() > void {
+    return hey(); | Because we call a yieldable function, it "contaminates" the function signature
+}
+
+test "Routines" {
+    | Type check this at runtime? since we don't know where the yield might occur?
+    thd<str, num, void> routine = *callingYieldable;
+
+    do {
+        num value = routine.resume("hello world");
+
+        print("value: {value}");
+    } until (routine.state == RoutineState.over);
+}

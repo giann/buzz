@@ -118,6 +118,7 @@ pub const TokenType = enum {
     Eof, // EOF
     Error, // Error
     Void, // void
+    Yield, // yield
 };
 
 pub const Keywords = [_]TokenType{

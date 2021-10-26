@@ -59,6 +59,7 @@ pub const VM = struct {
         OutOfBound,
         NumberOverflow,
         Custom, // TODO: remove when user can use this set directly in buzz code
+        BadRoutineState,
     } || Allocator.Error || std.fmt.BufPrintError;
 
     allocator: *Allocator,
@@ -274,7 +275,7 @@ pub const VM = struct {
         return ObjString.cast(self.readConstant(arg).Obj).?;
     }
 
-    fn run(self: *Self) Error!void {
+    pub fn run(self: *Self) Error!void {
         while (true) {
             const current_frame: *CallFrame = self.currentFrame().?;
             var full_instruction: u32 = self.readInstruction();
@@ -627,7 +628,7 @@ pub const VM = struct {
             }
         }
 
-        return true;
+        return;
     }
 
     fn foreach(self: *Self) !void {
@@ -824,7 +825,7 @@ pub const VM = struct {
         }
     }
 
-    fn call(self: *Self, closure: *ObjClosure, arg_count: u8) !void {
+    pub fn call(self: *Self, closure: *ObjClosure, arg_count: u8) !void {
         // We don't type check or check arity because it was done at comptime
         
         // TODO: do we check for stack overflow
